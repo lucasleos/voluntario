@@ -5,40 +5,30 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.google.firebase.database.*
+import unpsjb.ing.tntpm2024.voluntario.data.local.PreferenceHelper
+import unpsjb.ing.tntpm2024.voluntario.data.model.DevolucionNutricional
+import unpsjb.ing.tntpm2024.voluntario.data.repository.EstadisticasRepository
+import unpsjb.ing.tntpm2024.voluntario.model.Turno
+import unpsjb.ing.tntpm2024.voluntario.ui.components.DevolucionScreen
+import unpsjb.ing.tntpm2024.voluntario.ui.theme.VoluntarioTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ValueEventListener
-import unpsjb.ing.tntpm2024.voluntario.data.local.PreferenceHelper
-import unpsjb.ing.tntpm2024.voluntario.model.Turno
-import unpsjb.ing.tntpm2024.voluntario.ui.theme.VoluntarioTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val estadisticasRepo = EstadisticasRepository()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,11 +38,14 @@ class MainActivity : ComponentActivity() {
             VoluntarioTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     var turnoActual by remember { mutableStateOf<Turno?>(null) }
+                    var devolucionData by remember { mutableStateOf<DevolucionNutricional?>(null) }
+                    var cargandoDevolucion by remember { mutableStateOf(false) }
+
                     var turnoIdGuardado by remember {
                         mutableStateOf(PreferenceHelper.getTurnoId(this@MainActivity))
                     }
 
-                    // Escuchador en tiempo real del turno
+                    // Listener reactivo del estado del turno
                     DisposableEffect(turnoIdGuardado) {
                         val id = turnoIdGuardado
                         if (id != null) {
@@ -61,6 +54,21 @@ class MainActivity : ComponentActivity() {
                                 override fun onDataChange(snapshot: DataSnapshot) {
                                     val turno = snapshot.getValue(Turno::class.java)
                                     turnoActual = turno
+
+                                    // Si el turno está completado y tiene encuesta vinculada, pedimos la devolución
+                                    if (turno?.estado == "COMPLETADO" && !turno.encuestaAsociadaId.isNullOrEmpty() && devolucionData == null) {
+                                        cargandoDevolucion = true
+                                        estadisticasRepo.obtenerDevolucionNutricional(
+                                            encuestaAsociadaId = turno.encuestaAsociadaId,
+                                            onSuccess = { data ->
+                                                devolucionData = data
+                                                cargandoDevolucion = false
+                                            },
+                                            onError = {
+                                                cargandoDevolucion = false
+                                            }
+                                        )
+                                    }
                                 }
 
                                 override fun onCancelled(error: DatabaseError) {}
@@ -72,16 +80,39 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    VoluntarioScreenContent(
-                        modifier = Modifier.padding(innerPadding),
-                        turno = turnoActual,
-                        turnoIdGuardado = turnoIdGuardado,
-                        onSolicitarTurno = {
-                            solicitarTurnoEnFirebase { nuevoId ->
-                                turnoIdGuardado = nuevoId
+                    // Renderizado condicional
+                    if (turnoActual?.estado == "COMPLETADO") {
+                        if (cargandoDevolucion || devolucionData == null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(innerPadding),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator()
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Calculando tu balance nutricional y los promedios globales...")
+                                }
                             }
+                        } else {
+                            DevolucionScreen(
+                                modifier = Modifier.padding(innerPadding),
+                                devolucion = devolucionData!!
+                            )
                         }
-                    )
+                    } else {
+                        VoluntarioScreenContent(
+                            modifier = Modifier.padding(innerPadding),
+                            turno = turnoActual,
+                            turnoIdGuardado = turnoIdGuardado,
+                            onSolicitarTurno = {
+                                solicitarTurnoEnFirebase { nuevoId ->
+                                    turnoIdGuardado = nuevoId
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -174,13 +205,13 @@ fun VoluntarioScreenContent(
                 )
             }
 
-            // Caso 4: Estado ASIGNADO (Punto 1b completado)
+            // Caso 4: Estado ASIGNADO
             turno.estado == "ASIGNADO" && turno.asignacion != null -> {
                 Text(
                     text = "¡Turno Asignado!",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -196,12 +227,21 @@ fun VoluntarioScreenContent(
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = "Fecha: ${turno.asignacion.fecha}", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Fecha: ${turno.asignacion.fecha}",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "Hora: ${turno.asignacion.hora}", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Hora: ${turno.asignacion.hora}",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "Lugar / Dirección:")
-                        Text(text = turno.asignacion.lugar, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = turno.asignacion.lugar,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
 
                         if (turno.asignacion.indicaciones.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -214,20 +254,6 @@ fun VoluntarioScreenContent(
                         }
                     }
                 }
-            }
-
-            // Caso 5: Estado COMPLETADO (para el punto 1c)
-            turno.estado == "COMPLETADO" -> {
-                Text(
-                    text = "Encuesta Completada",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Preparando tu devolución nutricional y los promedios globales...",
-                    textAlign = TextAlign.Center
-                )
             }
         }
     }
