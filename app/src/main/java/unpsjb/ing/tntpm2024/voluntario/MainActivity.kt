@@ -1,5 +1,6 @@
 package unpsjb.ing.tntpm2024.voluntario
 
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -30,9 +31,19 @@ class MainActivity : ComponentActivity() {
 
     private val estadisticasRepo = EstadisticasRepository()
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // Manejo de respuesta de permiso
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         setContent {
             VoluntarioTheme {
@@ -125,20 +136,27 @@ class MainActivity : ComponentActivity() {
         val nuevoTurnoRef = dbRef.push()
         val turnoId = nuevoTurnoRef.key ?: return
 
-        val nuevoTurno = Turno(
-            turnoId = turnoId,
-            voluntarioId = voluntarioId,
-            estado = "SOLICITADO"
-        )
+        // Obtenemos el FCM token real antes de guardar
+        com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+            .addOnCompleteListener { task ->
+                val token = if (task.isSuccessful) task.result ?: "" else ""
 
-        nuevoTurnoRef.setValue(nuevoTurno)
-            .addOnSuccessListener {
-                PreferenceHelper.saveTurnoId(this, turnoId)
-                Toast.makeText(this, "¡Solicitud registrada!", Toast.LENGTH_SHORT).show()
-                onSuccess(turnoId)
-            }
-            .addOnFailureListener { error ->
-                Toast.makeText(this, "Error: ${error.message}", Toast.LENGTH_SHORT).show()
+                val nuevoTurno = Turno(
+                    turnoId = turnoId,
+                    voluntarioId = voluntarioId,
+                    fcmToken = token,
+                    estado = "SOLICITADO"
+                )
+
+                nuevoTurnoRef.setValue(nuevoTurno)
+                    .addOnSuccessListener {
+                        PreferenceHelper.saveTurnoId(this, turnoId)
+                        Toast.makeText(this, "¡Solicitud registrada!", Toast.LENGTH_SHORT).show()
+                        onSuccess(turnoId)
+                    }
+                    .addOnFailureListener { error ->
+                        Toast.makeText(this, "Error: ${error.message}", Toast.LENGTH_SHORT).show()
+                    }
             }
     }
 }
