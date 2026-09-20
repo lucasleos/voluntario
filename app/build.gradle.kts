@@ -39,6 +39,9 @@ android {
 }
 
 dependencies {
+    // Firebase Cloud Messaging
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
     implementation("com.google.firebase:firebase-database")  // Para Realtime Database
     implementation(platform(libs.androidx.compose.bom))
