@@ -150,7 +150,8 @@ fun NutrienteCard(
                 Text(
                     text = "Promedio muestra",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = valorPromedio,
